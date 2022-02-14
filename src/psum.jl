@@ -32,7 +32,7 @@ function Multilevel.process_coarse!(ord::MLOrdering{PSum}, level) # TODO figure 
     end
     for windowsize in ord.config.windowsizes
         window_minimization(ord.cost, A, order, embedding, volume; windowsize=windowsize, config=ord.config)
-        # window_minimization(ord.cost, A, order, embedding, volume; windowsize=windowsize, config=ord.config, rev=true)
+        window_minimization(ord.cost, A, order, embedding, volume; windowsize=windowsize, config=ord.config, rev=true)
     end
 
 end 
