@@ -19,11 +19,11 @@ function evalorder(ps::PSum, A, order)
 end
 
 function smoothing(cost::PSum, A, x, order, volume, cols) # TODO more general
-    x .= (A * x) ./ (A * ones(size(x, 1)))
-    x .= (A * x) ./ (A * ones(size(x, 1)))
-    x .= (A * x) ./ (A * ones(size(x, 1)))
-    x .= (A * x) ./ (A * ones(size(x, 1)))
-    # twosum_smoothing(A, x, cols)
+    # x .= (A * x) ./ (A * ones(size(x, 1)))
+    # x .= (A * x) ./ (A * ones(size(x, 1)))
+    # x .= (A * x) ./ (A * ones(size(x, 1)))
+    # x .= (A * x) ./ (A * ones(size(x, 1)))
+    twosum_smoothing(A, x, cols)
     order .= sortperm(x)
     order_embedding!(x, order, volume)
     return nothing
