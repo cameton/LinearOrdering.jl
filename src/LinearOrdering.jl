@@ -15,6 +15,8 @@ include("./psum.jl")
 include("./onesum.jl")
 include("./twosum.jl")
 
-export nothing
+export PSum
+
+export ordergraph
 
 end # module
