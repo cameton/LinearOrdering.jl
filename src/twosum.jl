@@ -27,12 +27,12 @@ function window_minimization(cost::PSum, A, order, embedding, volume; windowsize
     for i in window_steps(n, windowsize, stride; rev=rev)
         backup .= embedding
         backup_order .= order
-        window = invperm(order)[i:(i + windowsize - 1)]
+        window = order[i:(i + windowsize - 1)]
         Δx = Δ * embedding
         δ = window_border(window, Δ, embedding, Δx, volume)
         embedding[window] .+= δ
 
-        padded_window = invperm(order)[max(1, i - padding):min(n, i + windowsize - 1 + padding)]
+        padded_window = order[max(1, i - padding):min(n, i + windowsize - 1 + padding)]
         for j in window_sweeps
             smoothing(cost, A, embedding, order, volume, padded_window)
         end
