@@ -65,6 +65,6 @@ function twosum_smoothing(A, y, cols)
     for col in cols
         y[col] = weighted_column_average(A, y, col)
     end
-    return (A * y) ./ (A * ones(size(y, 1)))
+    return y
 end
 
