@@ -32,7 +32,7 @@ end
 function Multilevel.process_coarse!(ord::MLOrdering{PSum}, level) # TODO figure out the F vs Fc situation
     (; A, volume, order, embedding) = first(level)
     for _ in ord.config.gauss_sweeps
-        # smoothing(ord.cost, A, embedding, order, volume, order)
+        smoothing(ord.cost, A, embedding, order, volume, order)
     end
     for windowsize in ord.config.windowsizes
         window_minimization(ord.cost, A, order, embedding, volume; windowsize=windowsize, config=ord.config)
@@ -63,7 +63,7 @@ function Multilevel.uncoarsen!(ord::MLOrdering{PSum}, level)
     order_embedding!(embedding, order, volume)
 
     for _ in ord.config.compat_sweeps
-        # smoothing(ord.cost, A, embedding, order, volume, Fc)
+        smoothing(ord.cost, A, embedding, order, volume, Fc)
     end
 end
 
