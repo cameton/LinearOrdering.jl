@@ -1,10 +1,13 @@
 
-function window_border(window, Δ, x, Δx, volume)
-    M = Δ[window, window]
+sublaplacian(A, d, rows) = Matrix(Diagonal(d[rows]) - A[rows, rows])
+
+function window_border(A, d, x, volume, window) # TODO make sure this is right
+    Δx = d[window] .* x[window] .- (A[window, :] * x) 
+    M = sublaplacian(A, d, window)
     b1 = volume[window]
     b2 = b1 .* x[window]
     bordered = [M b1 b2; b1' 0 0; b2' 0 0]
-    b = [Δx[window]; 0; 0]
+    b = [Δx; 0; 0]
     return \(bordered, b)[1:(end-2)]
 end
 
@@ -16,55 +19,47 @@ function window_steps(n, windowsize, stride; rev = false)
     end
 end
 
-function window_minimization(cost::PSum, A, order, embedding, volume; windowsize, config, rev=false)
+function window_minimization(cost::PSum, Ginfo, Oinfo; windowsize, config, rev=false)
+    (; A, d) = Ginfo
+    (; order, embedding, volume) = Oinfo
     n = length(order)
     backup = similar(embedding)
     backup_order = similar(order)
-    Δ = laplacian_matrix(SimpleGraph(Symmetric(A))) # TODO do something better here
-    best = evalorder(cost, A, order)
-    (; padding, window_sweeps, stride) = config
+    best = evalorder(cost, A, embedding)
+    (; pad_percent, window_sweeps, stride_percent) = config
 
-    for i in window_steps(n, windowsize, stride; rev=rev)
+    accept_change = 0
+    reject_change = 0
+    for i in window_steps(n, windowsize, floor(Int, windowsize * stride_percent); rev=rev)
         backup .= embedding
         backup_order .= order
-        window = order[i:(i + windowsize - 1)]
-        Δx = Δ * embedding
-        δ = window_border(window, Δ, embedding, Δx, volume)
+        invorder = invperm(order)
+        window = invorder[i:(i + windowsize - 1)]
+        δ = window_border(A, d, embedding, volume, window)
         embedding[window] .+= δ
 
-        padded_window = order[max(1, i - padding):min(n, i + windowsize - 1 + padding)]
+        padding = ceil(Int, pad_percent * windowsize)
+        padded_window = invorder[max(1, i - padding):min(n, i + windowsize - 1 + padding)]
         for j in window_sweeps
-            smoothing(cost, A, embedding, order, volume, padded_window)
+            smoothing(cost, A, d, embedding, order, volume, :, padded_window)
         end
 
-        cur = evalorder(cost, A, order)
-        if cur > best
+        cur = evalorder(cost, A, embedding)
+        if cur >= best
             embedding .= backup
             order .= backup_order
+            reject_change += 1
         else
             best = cur
+            accept_change += 1
         end
     end
+    println("WindowMin Size $(size(A,1)) Winsize $windowsize Accept $accept_change Reject $reject_change Ratio $(accept_change / (accept_change + reject_change))")
     return nothing
 end
 
-function weighted_column_average(A, y, c)
-    rows = rowvals(A)
-    vals = nonzeros(A)
-    acc_num, acc_den = 0, 0
-
-    for idx in nzrange(A, c)
-        val = vals[idx]
-        acc_num += y[rows[idx]] * val
-        acc_den += val
-    end
-    return acc_num / acc_den
-end
-
-function twosum_smoothing(A, y, cols)
-    for col in cols
-        y[col] = weighted_column_average(A, y, col)
-    end
+function twosum_smoothing(A, d, y, cols, rows)
+    y[rows] .= (A[rows, cols] * y[cols]) ./ d[rows] # TODO more efficient. I think it's correct now though
     return y
 end
 
