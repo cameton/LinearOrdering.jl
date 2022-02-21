@@ -5,8 +5,9 @@ struct MLOrdering{C<:AbstractOrderCost, T}
 end
 
 struct OrderInfo{T <: Real}
-    order::Vector{Int}
-    embedding::Vector{T}
+    idx_to_embedding::Vector{T}
+    position_to_idx::Vector{Int}
+    idx_to_position::Vector{Int}
     volume::Vector{T}
 end
 
@@ -22,64 +23,65 @@ struct OrderLevel{T <: Real}
     Oinfo::OrderInfo{T}
 end
 
-lazy_cumsum(iter) = Iterators.accumulate(+, iter)
-
-function order_embedding!(x, order, volume)
-    for (i, v) in enumerate(lazy_cumsum(volume[idx] for idx in order))
-        x[i] = v
+function inflate_embedding!(idx_to_embedding, position_to_idx, volume)
+    for (i, v) in enumerate(lazy_cumsum(volume[idx] for idx in position_to_idx))
+        idx_to_embedding[i] = v
     end
-    invpermute!(x, order)
-    x .-= volume ./ 2
-    return x
+    invpermute!(idx_to_embedding, position_to_idx)
+    idx_to_embedding .-= volume ./ 2
+    return idx_to_embedding
 end
-function embedding_to_order!(order, x) # TODO write better
-    # order .= invperm(sortperm(x))
-    sortperm!(order, x)
-    return order
-end
-
-function initorder(C, order, volume)
-    orderc = sortperm(C; by=idx -> order[idx])
-    embeddingc = similar(volume, length(C))
-    order_embedding!(embeddingc, orderc, volume)
-    return orderc, embeddingc
+function inflate_embedding!(Oinfo)
+    (; position_to_idx, idx_to_position, idx_to_embedding, volume) = Oinfo
+    sortperm!(position_to_idx, idx_to_embedding)
+    invperm!(idx_to_position, position_to_idx)
+    inflate_embedding!(idx_to_embedding, position_to_idx, volume)
+    return Oinfo
 end
 
+function init_coarse_order(C, P, Oinfo::OrderInfo{T}) where {T}
+    (; idx_to_position, volume) = Oinfo
+
+    position_to_coarse_idx = sortperm(C; by = idx -> idx_to_position[idx])
+    coarse_idx_to_position = invperm(position_to_coarse_idx)
+    coarse_idx_to_embedding = collect(T, coarse_idx_to_position)
+    volumec = P' * volume
+
+    cOinfo = OrderInfo(coarse_idx_to_embedding, position_to_coarse_idx, coarse_idx_to_position, volumec)
+
+    return inflate_embedding!(cOinfo)
+end
 
 function Multilevel.coarsen!(ord::MLOrdering, level)
     (; Ginfo, Oinfo) = first(level)
     (; A) = Ginfo
-    (; order, embedding, volume) = Oinfo
-    dropzeros!(A)
+    (; position_to_idx, idx_to_embedding, volume) = Oinfo
+    dropzeros!(A) # TODO necessary?
 
     testG = SimpleGraph(Symmetric(A))
-    println("Fine Vertices $(nv(testG)) Edges $(ne(testG)) MinDeg $(minimum(degree(testG))) MaxDeg $(maximum(degree(testG))) MeanDeg $(sum(degree(testG)) / nv(testG))")
-    println("Fine Volume Max $(maximum(volume)) Min $(minimum(volume)) Mean $(sum(volume) / length(volume))")
-    println("Fine Adj Max $(maximum(A)) Min $(minimum(nonzeros(A))) Mean $(sum(nonzeros(A)) / length(nonzeros(A)))")
-    println("Fine total volume $(sum(volume))")
+    print_graph_info("Fine", testG)
+    print_volume_info("Fine", volume)
+    print_adj_info("Fine", A)
+
     strength = A # TODO compute connection strength
     Ac, P, Ginfo.C, Ginfo.F = coarsen(ord.config.coarsening, A; volume = volume, strength = strength) # TODO more generic
     Coarsening.fix_adjacency!(Ac)
-    println("")
     dropzeros!(Ac)
 
+    cGinfo = GraphInfo(Ac, sumcols(Ac), nothing, nothing)
+    cOinfo = init_coarse_order(Ginfo.C, P, Oinfo)
+
     testG = SimpleGraph(Symmetric(Ac))
-    println("Coarse Vertices $(nv(testG)) Edges $(ne(testG)) MinDeg $(minimum(degree(testG))) MaxDeg $(maximum(degree(testG))) MeanDeg $(sum(degree(testG)) / nv(testG))")
-    volumec = P' * volume
 
-
-    println("Coarse Volume Max $(maximum(volumec)) Min $(minimum(volumec)) Mean $(sum(volumec) / length(volumec))")
-
-    println("Coarse Adj Max $(maximum(Ac)) Min $(minimum(nonzeros(Ac))) Mean $(sum(nonzeros(Ac)) / length(nonzeros(Ac)))")
-
-    println("Coarse total volume $(sum(volumec))")
     println("")
     println("-----------------------------------")
     println("")
 
-    nc = length(Ginfo.C)
-    cGinfo = GraphInfo(Ac, sumcols(Ac), nothing, nothing)
-    cOinfo = OrderInfo(initorder(Ginfo.C, order, volumec)..., volumec)
+    testGc = SimpleGraph(Ac)
+    print_graph_info("Coarse", testGc)
+    print_volume_info("Coarse", cOinfo.volume)
+    print_adj_info("Coarse", Ac)
+
 
     push!(level, OrderLevel(cGinfo, cOinfo))
     return nothing
@@ -88,72 +90,79 @@ end
 
 function Multilevel.doinitial(ord::MLOrdering, level)
     (; Oinfo) = first(level)
-    return length(Oinfo.order) < ord.config.coarsest
+    return length(Oinfo.idx_to_embedding) < ord.config.coarsest
+end
+
+function copyorder!(dstorder, srcorder)
+    copyto!(dstorder.position_to_idx, srcorder.position_to_idx)
+    copyto!(dstorder.idx_to_position, srcorder.idx_to_position)
+    copyto!(dstorder.idx_to_embedding, srcorder.idx_to_embedding)
+    copyto!(dstorder.volume, srcorder.volume)
+    return dstorder
 end
 
 function Multilevel.initial!(ord::MLOrdering, level)
     (; Ginfo, Oinfo) = first(level)
     (; A) = Ginfo
-    (; order, embedding, volume) = Oinfo
+    (; idx_to_embedding) = Oinfo
 
-    best = evalorder(ord.cost, A, embedding)
+    best = evalorder(ord.cost, A, idx_to_embedding)
+    backup = deepcopy(Oinfo)
     println("Coarsest PreEval $best")
-    for perm in permutations(order)
-        order_embedding!(embedding, perm, volume)
-        cur = evalorder(ord.cost, A, embedding)
+    for perm in permutations(1:length(idx_to_embedding))
+        idx_to_embedding .= perm
+        inflate_embedding!(Oinfo) # TODO see if it's necessary to do the full process
+        cur = evalorder(ord.cost, A, idx_to_embedding)
         if cur < best
-            order .= perm
+            copyorder!(backup, Oinfo)
             best = cur
         end
     end
-    order_embedding!(embedding, order, volume)
+    copyorder!(Oinfo, backup)
     println("Coarsest PostEval $best")
     return nothing
 end
 
-function shift(order, col, dir)
-    while dir != 0
-        if dir < 0
-            order[col], order[col - 1] = order[col - 1], order[col]
-            col -= 1
-            dir += 1
-        else
-            order[col], order[col + 1] = order[col + 1], order[col]
-            col += 1
-            dir -= 1
-        end
+function shift!(buf, x, idx, segsize, step)
+    # TODO bounds checks and warnings
+    copyto!(buf, 1, x, idx, segsize)
+    if step <= 0
+        copyto!(x, idx + step + segsize, x, idx + step, abs(step))
+    else    
+        copyto!(x, idx, x, idx + segsize, step)
     end
-    return order
-end
+    copyto!(x, idx + step, buf, 1, segsize)
 
-function node_by_node!(cost, A, embedding, order, volume, k)
-    n = length(order)
+    return x
+end
+moveto!(buf, x, srcidx, dstidx, segsize) = shift!(buf, x, srcidx, segsize, dstidx - srcidx)
+
+function node_by_node!(cost, Ginfo, Oinfo, k, a, b, c) # TODO clean this up
+    (; A) = Ginfo
+    (; idx_to_embedding, position_to_idx, volume) = Oinfo
+
+    n = length(idx_to_embedding)
+    buf = zeros(1)
+    best = evalorder(cost, A, idx_to_embedding)
+    backup = deepcopy(Oinfo)
+
     for col in axes(A, 2)
-        best = evalorder(cost, A, embedding)
-        candidate = deepcopy(embedding)
-        lo = min(k, col - 1) 
-        locol = col - lo
-        winsize = lo + min(k, n - col) + 1
-        shift(candidate, col, -lo)
-        col = locol
-        test = evalorder(cost, A, candidate) # TODO make less repetitive
-        if test < best
-            best = test
-            copyto!(embedding, locol, candidate, locol, winsize)
-        end
-        for i in 1:(winsize - 1)
-            shift(candidate, col, 1)
-            col += 1
-            test = evalorder(cost, A, candidate)
-            if test < best
+        srcidx = col
+        for dstidx in max(1, col - k):min(n, col + k)
+            # println("Col $col Src $srcidx Dst $dstidx Eval $(evalorder(cost, A, idx_to_embedding))")
+            # println(position_to_idx[max(1, col-k):min(n, col+k)])
+            moveto!(buf, position_to_idx, srcidx, dstidx, 1)
+            srcidx = dstidx
+            inflate_embedding!(idx_to_embedding, position_to_idx, volume)
+            inflate_embedding!(Oinfo)
+            test = evalorder(cost, A, idx_to_embedding)
+            if test <= best
                 best = test
-                copyto!(embedding, locol, candidate, locol, winsize)
+                copyorder!(backup, Oinfo)
             end
         end
     end
-
-    embedding_to_order!(order, embedding)
-    order_embedding!(embedding, order, volume)
-    return order
+    copyorder!(Oinfo, backup)
+    return Oinfo
 end
 

@@ -1,16 +1,14 @@
 
 
-lazy_cumdiff(v, total) = Iterators.accumulate(-, v, init=total)
-
-function onesum_smoothing(A, x, cols, rows) # TODO iterate one by one rather than all at once
+function onesum_smoothing(A, idx_to_embedding, cols, rows) # TODO iterate one by one rather than all at once
     if cols == (:)
-        cols = 1:length(x)
+        cols = 1:length(idx_to_embedding)
     end
     if rows == (:)
-        rows = 1:length(x)
+        rows = 1:length(idx_to_embedding)
     end
-    order = sortperm(cols; by = idx -> x[idx])
-    total = sum(x[cols])
+    order = invperm(sortperm(cols; by = idx -> idx_to_embedding[idx])) # TODO should this be like this?
+    total = sum(idx_to_embedding[cols])
     best = total
     for row in rows # TODO make more efficient, remove nested loop
         itersum = lazy_cumsum(A[row, col] for col in order)
@@ -22,7 +20,8 @@ function onesum_smoothing(A, x, cols, rows) # TODO iterate one by one rather tha
                 idx = i
             end
         end
-        x[row] = idx == length(cols) ? x[order[idx]] + 0.5 : (x[order[idx]] + x[order[idx+1]]) / 2
+        idx_to_embedding[row] = idx == length(cols) ? idx_to_embedding[order[idx]] + 0.5 : (idx_to_embedding[order[idx]] + idx_to_embedding[order[idx+1]]) / 2
     end
-    return x
+    println("PRE INFLATION $(evalorder(PSum(1), A, idx_to_embedding))")
+    return idx_to_embedding
 end
