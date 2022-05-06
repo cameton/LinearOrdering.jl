@@ -54,7 +54,7 @@ function window_minimization(cost::PSum, Ginfo, Oinfo; windowsize, config, rev=f
             accept_change += 1
         end
     end
-    println("WindowMin Size $(size(A,1)) Winsize $windowsize Accept $accept_change Reject $reject_change Ratio $(accept_change / (accept_change + reject_change))")
+#   println("WindowMin Size $(size(A,1)) Winsize $windowsize Accept $accept_change Reject $reject_change Ratio $(accept_change / (accept_change + reject_change))")
     return nothing
 end
 

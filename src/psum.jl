@@ -3,7 +3,7 @@ struct PSum <: AbstractOrderCost
     p::Int
 end
 
-function evalorder(ps::PSum, A, idx_to_position)
+function evalorder(ps::PSum, A, idx_to_val)
     rows = rowvals(A)
     vals = nonzeros(A)
     acc = zero(eltype(A))
@@ -11,7 +11,7 @@ function evalorder(ps::PSum, A, idx_to_position)
         for idx in nzrange(A, c)
             row = rows[idx]
             if c < row
-                acc += vals[idx] * abs(idx_to_position[c] - idx_to_position[row]) ^ ps.p
+                acc += vals[idx] * abs(idx_to_val[c] - idx_to_val[row]) ^ ps.p
             end
         end
     end
@@ -25,7 +25,7 @@ function smoothing(cost::PSum, Ginfo, Oinfo, cols, rows) # TODO more general
     if cost.p == 2
         twosum_smoothing(A, d, idx_to_embedding, cols, rows)
     elseif cost.p == 1
-        onesum_smoothing(A, idx_to_embedding, cols, rows)
+        onesum_smoothing(Ginfo, Oinfo, cols, rows)
     end
     inflate_embedding!(Oinfo)
     return nothing
@@ -39,9 +39,10 @@ function Multilevel.process_coarse!(ord::MLOrdering{PSum}, level)
     best = evalorder(ord.cost, A, idx_to_embedding)
     backup = deepcopy(Oinfo)
 
-    for _ in 1:ord.config.compat_sweeps
+    for itr in 1:ord.config.compat_sweeps
         smoothing(ord.cost, Ginfo, Oinfo, :, F)
         test = evalorder(ord.cost, A, idx_to_embedding)
+        @debug "Iter $itr BEST $best TEST $test"
         if test <= best
             copyorder!(backup, Oinfo)
             best = test
@@ -52,11 +53,12 @@ function Multilevel.process_coarse!(ord::MLOrdering{PSum}, level)
     copyorder!(Oinfo, backup)
 
     val = evalorder(ord.cost, A, idx_to_embedding)
-    println("Size $(size(A, 1)) Post Compat $val")
+    @debug "Size $(size(A, 1)) Post Compat $val"
 
-    for _ in 1:ord.config.gauss_sweeps
+    for itr in 1:ord.config.gauss_sweeps
         smoothing(ord.cost, Ginfo, Oinfo, :, :)
         test = evalorder(ord.cost, A, idx_to_embedding)
+        @debug("Iter $itr BEST $best TEST $test")
         if test <= best
             copyorder!(backup, Oinfo)
             best = test
@@ -67,25 +69,37 @@ function Multilevel.process_coarse!(ord::MLOrdering{PSum}, level)
     copyorder!(Oinfo, backup)
 
     val = evalorder(ord.cost, A, idx_to_embedding)
-    println("Size $(size(A, 1)) Post Gauss $val")
+    @debug("Size $(size(A, 1)) Post Gauss $val")
 
-    if ord.cost.p == 2
-        # for windowsize in ord.config.windowsizes
-        #       window_minimization(ord.cost, Ginfo, Oinfo; windowsize=windowsize, config=ord.config)
-        #       window_minimization(ord.cost, Ginfo, Oinfo; windowsize=windowsize, config=ord.config, rev=true)
-        # end
-        node_by_node!(ord.cost, Ginfo, Oinfo, ord.config.node_window_size)
-    elseif ord.cost.p == 1
-        node_by_node!(ord.cost, Ginfo, Oinfo, ord.config.node_window_size)
+    for itr in 1:ord.config.node_window_sweeps
+        if ord.cost.p == 2
+            # for windowsize in ord.config.windowsizes
+            #       window_minimization(ord.cost, Ginfo, Oinfo; windowsize=windowsize, config=ord.config)
+            #       window_minimization(ord.cost, Ginfo, Oinfo; windowsize=windowsize, config=ord.config, rev=true)
+            # end
+            node_by_node!(ord.cost, Ginfo, Oinfo, ord.config.node_window_size)
+        elseif ord.cost.p == 1
+            node_by_node!(ord.cost, Ginfo, Oinfo, ord.config.node_window_size)
+        end
+        test = evalorder(ord.cost, A, idx_to_embedding) # TODO more efficient evaluations
+        @debug("Iter $itr BEST $best TEST $test")
+        if test < best # check if shifts are made
+            copyorder!(backup, Oinfo)
+            best = test
+        else
+            break
+        end
     end
+    copyorder!(Oinfo, backup)
 
     val = evalorder(ord.cost, A, idx_to_embedding)
-    println("Size $(size(A, 1)) Post Strict $val")
+    @debug("Size $(size(A, 1)) Post Strict $val")
 
     return nothing
 end 
 
 function Multilevel.uncoarsen!(ord::MLOrdering{PSum}, level)
+   @debug("\n-----------------------------------\n")
     (; Oinfo) = pop!(level)
     coarse_idx_to_embedding = Oinfo.idx_to_embedding
 
@@ -96,19 +110,20 @@ function Multilevel.uncoarsen!(ord::MLOrdering{PSum}, level)
     idx_to_embedding .= 0 # TODO should it be like this
     idx_to_embedding[C] = coarse_idx_to_embedding
 
+#   @debug("Coarse SEEDS $(idx_to_embedding[C])")
     connection = sumcols(A, C) # TODO check if this is right
     tmp_thing = GraphInfo(Ginfo.A, connection, Ginfo.C, Ginfo.F) # TODO this is janky, fix it
     smoothing(ord.cost, tmp_thing, Oinfo, C, F)
+#   @debug("FINE SEEDS $(idx_to_embedding[C])")
 
     val = evalorder(ord.cost, A, idx_to_embedding)
-    println("Size $(size(A, 1)) Post Interpolation $val")
-
+    @debug("Size $(size(A, 1)) Post Interpolation $val")
 
     randorder = randperm(size(A, 1))
     randembed = zeros(size(A, 1))
     inflate_embedding!(randembed, randorder, volume)
     randobj = evalorder(ord.cost, A, randembed)
-    println("RANDORDER $randobj Ratio $(val / randobj)")
+    @debug("RANDORDER $randobj Ratio $(val / randobj)")
    
 end
 
@@ -126,8 +141,8 @@ function ordergraph(cost, G; config...)
     idx_to_embedding = collect(Float64, idx_to_position)
     volume = ones(nv(G))
     Oinfo = OrderInfo(idx_to_embedding, position_to_idx, idx_to_position, volume)
-    println("STARTING COST $(evalorder(cost, A, idx_to_embedding))")
-    top = OrderLevel{Float64}(GraphInfo(A, sumcols(A), nothing, nothing), Oinfo)
+#   println("STARTING COST $(evalorder(cost, A, idx_to_embedding))")
+    top = OrderLevel{Float64}(1, GraphInfo(A, sumcols(A), nothing, nothing), Oinfo)
     level = Stack{OrderLevel{Float64}}()
     push!(level, top)
     Multilevel.cycle!(ord, level)

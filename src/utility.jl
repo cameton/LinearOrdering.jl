@@ -13,8 +13,8 @@ function invperm!(dst, src)
     return dst
 end
 
-lazy_cumsum(iter) = Iterators.accumulate(+, iter)
-lazy_cumdiff(v, total) = Iterators.accumulate(-, v, init=total)
+lazy_cumsum(iter; init=0) = Iterators.accumulate(+, iter, init=init)
+lazy_cumdiff(v; init=sum(v)) = Iterators.accumulate(-, v, init=init)
 
 function sumcols!(b, A, cols)
     for col in cols
@@ -23,7 +23,19 @@ function sumcols!(b, A, cols)
     return b
 end
 
-print_graph_info(label, testG) = println("$label Vertices $(nv(testG)) Edges $(ne(testG)) MinDeg $(minimum(degree(testG))) MaxDeg $(maximum(degree(testG))) MeanDeg $(sum(degree(testG)) / nv(testG))")
-print_volume_info(label, volume) = println("$label Volume Total $(sum(volume)) Max $(maximum(volume)) Min $(minimum(volume)) Mean $(sum(volume) / length(volume))") 
-print_adj_info(label, A) = println("$label Adj Max $(maximum(A)) Min $(minimum(nonzeros(A))) Mean $(sum(nonzeros(A)) / length(nonzeros(A)))")
+function debug_level_info(level_id, Ginfo, Oinfo)
+    (; A) = Ginfo
+    (; volume) = Oinfo
+    G = SimpleGraph(Symmetric(A)) # TODO ensure symmetric elsewhere - do something more efficient
+    degreeG = degree(G)
+    nzA = nonzeros(A)
+    return """ 
+    ########### $level_id
+    Vertices $(nv(G)) Edges $(ne(G))
+    MinDeg $(minimum(degreeG)) MaxDeg $(maximum(degreeG)) MeanDeg $(mean(degreeG))
+    TotalVol $(sum(volume)) MaxVol $(maximum(volume)) MinVol $(minimum(volume)) MeanVol $(mean(volume))
+    MaxAdj $(maximum(nzA)) MinAdj $(minimum(nzA)) MeanAdj $(mean(nzA))
+    ###########
+    """
+end
 
