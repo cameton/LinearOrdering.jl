@@ -53,7 +53,7 @@ function init_coarse_order(C, P, Oinfo::OrderInfo{T}) where {T}
     return inflate_embedding!(cOinfo)
 end
 
-function Multilevel.coarsen!(ord::MLOrdering, level)
+function Multilevel.descend!(ord::MLOrdering, level)
     (; level_id, Ginfo, Oinfo) = first(level)
     (; A) = Ginfo
     (; position_to_idx, idx_to_embedding, idx_to_position, volume) = Oinfo
@@ -74,7 +74,7 @@ function Multilevel.coarsen!(ord::MLOrdering, level)
 end
 
 
-function Multilevel.doinitial(ord::MLOrdering, level)
+function Multilevel.is_lowest(ord::MLOrdering, level)
     (; Oinfo) = first(level)
     return length(Oinfo.idx_to_embedding) < ord.config.coarsest
 end
@@ -87,7 +87,7 @@ function copyorder!(dstorder, srcorder)
     return dstorder
 end
 
-function Multilevel.initial!(ord::MLOrdering, level)
+function Multilevel.lowest!(ord::MLOrdering, level)
     (; level_id, Ginfo, Oinfo) = first(level)
     (; A) = Ginfo
     (; idx_to_embedding) = Oinfo
