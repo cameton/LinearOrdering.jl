@@ -31,7 +31,7 @@ function smoothing(cost::PSum, Ginfo, Oinfo, cols, rows) # TODO more general
     return nothing
 end
 
-function Multilevel.post_ascent(ord::MLOrdering{PSum}, level)
+function Multilevel.post_ascent!(ord::MLOrdering{PSum}, level)
     (; Ginfo, Oinfo) = first(level)
     (; A, d, C, F) = Ginfo
     (; volume, position_to_idx, idx_to_embedding) = Oinfo
@@ -98,7 +98,7 @@ function Multilevel.post_ascent(ord::MLOrdering{PSum}, level)
     return nothing
 end 
 
-function Multilevel.uncoarsen!(ord::MLOrdering{PSum}, level)
+function Multilevel.ascend!(ord::MLOrdering{PSum}, level)
    @debug("\n-----------------------------------\n")
     (; Oinfo) = pop!(level)
     coarse_idx_to_embedding = Oinfo.idx_to_embedding
