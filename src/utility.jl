@@ -1,4 +1,13 @@
 
+function sortedfirstoption(a, x)
+    fst = searchsortedfirst(a, x)
+    if fst > length(a) || a[fst] != x
+        return nothing
+    end
+    return Some(fst)
+end
+
+
 function invperm!(dst, src)
     Base.require_one_based_indexing(src)
     Base.require_one_based_indexing(dst)
